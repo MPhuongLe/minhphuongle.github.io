@@ -9,24 +9,28 @@ async function getPageProperties(
   schema: CollectionPropertySchemaMap
 ) {
   const api = new NotionAPI()
-  // Support both old format (block[id].value) and new format (block[id].value.value)
-  const blockValue = block?.[id]?.value?.value ?? block?.[id]?.value
-  const rawProperties = Object.entries(blockValue?.properties || [])
+
+  // --- FIX START: Unwrap nested block structure ---
+  const blockData = block?.[id]?.value ?? block?.[id]
+  const rawProperties = Object.entries(blockData?.properties || [])
+  // --- FIX END ---
+
   const excludeProperties = ["date", "select", "multi_select", "person", "file"]
   const properties: any = {}
+  
   for (let i = 0; i < rawProperties.length; i++) {
     const [key, val]: any = rawProperties[i]
     properties.id = id
+    
     if (schema[key]?.type && !excludeProperties.includes(schema[key].type)) {
       properties[schema[key].name] = getTextContent(val)
     } else {
       switch (schema[key]?.type) {
         case "file": {
           try {
-            // Support both old format (block[id].value) and new format (block[id].value.value)
-            const Block = block?.[id]?.value?.value ?? block?.[id]?.value
+            // Use the unwrapped blockData here
             const url: string = val[0][1][0][1]
-            const newurl = customMapImageUrl(url, Block)
+            const newurl = customMapImageUrl(url, blockData) 
             properties[schema[key].name] = newurl
           } catch (error) {
             properties[schema[key].name] = undefined
@@ -35,40 +39,38 @@ async function getPageProperties(
         }
         case "date": {
           const dateProperty: any = getDateValue(val)
-          delete dateProperty.type
+          if (dateProperty) {
+            delete dateProperty.type
+          }
           properties[schema[key].name] = dateProperty
           break
         }
-        case "select": {
-          const selects = getTextContent(val)
-          if (selects[0]?.length) {
-            properties[schema[key].name] = selects.split(",")
-          }
-          break
-        }
+        case "select": 
         case "multi_select": {
           const selects = getTextContent(val)
-          if (selects[0]?.length) {
+          if (selects && selects.length > 0) {
             properties[schema[key].name] = selects.split(",")
           }
           break
         }
         case "person": {
           const rawUsers = val.flat()
-
           const users = []
           for (let i = 0; i < rawUsers.length; i++) {
             if (rawUsers[i][0][1]) {
               const userId = rawUsers[i][0]
               const res: any = await api.getUsers(userId)
+              
+              // Handle potential nesting in getUsers response as well
               const resValue =
-                res?.recordMapWithRoles?.notion_user?.[userId[1]]?.value
+                res?.recordMapWithRoles?.notion_user?.[userId[1]]?.value ?? 
+                res?.recordMapWithRoles?.notion_user?.[userId[1]]
+
               const user = {
                 id: resValue?.id,
                 name:
                   resValue?.name ||
-                  `${resValue?.family_name}${resValue?.given_name}` ||
-                  undefined,
+                  (resValue?.family_name ? `${resValue.family_name}${resValue.given_name}` : undefined),
                 profile_photo: resValue?.profile_photo || null,
               }
               users.push(user)
