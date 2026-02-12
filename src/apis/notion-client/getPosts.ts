@@ -4,7 +4,7 @@ import { idToUuid } from "notion-utils";
 
 import getAllPageIds from "src/libs/utils/notion/getAllPageIds";
 import getPageProperties from "src/libs/utils/notion/getPageProperties";
-import { TPosts } from "src/types";
+import { TPosts, CustomExtendedRecordMap } from "src/types";
 
 /**
  * Notion에서 게시글을 가져오는 함수 (최대 10회 재시도, Throttling, 지수 백오프 및 배치 요청 적용)
@@ -58,9 +58,9 @@ export const getPosts = async (): Promise<TPosts> => {
     };
 
     // Notion 페이지 데이터 가져오기 (Throttling 및 백오프 적용)
-    let response;
+    let response: CustomExtendedRecordMap;
     try {
-      response = await fetchWithThrottle(() => api.getPage(id), "getPage");
+      response = await fetchWithThrottle(() => api.getPage(id), "getPage") as CustomExtendedRecordMap;
     } catch (error) {
       console.error("❌ Notion 페이지 데이터를 가져오는 데 실패했습니다.", error);
       return [];
@@ -70,13 +70,16 @@ export const getPosts = async (): Promise<TPosts> => {
     id = idToUuid(id);
     console.log("✅ Notion Page ID (UUID 변환됨):", id);
 
-    // Notion 컬렉션 존재 여부 확인
-    const collectionObj = Object.values(response.collection || {})[0];
+    // Notion 컬렉션 존재 여부 확인 (nested value 지원)
+    const collectionObj = Object.values(response.collection || {})[0] as
+      | { value?: { value?: { schema?: unknown }; schema?: unknown }; schema?: unknown }
+      | undefined;
     if (!collectionObj) {
       console.warn("⚠️ Notion 컬렉션 데이터가 없습니다.");
       return [];
     }
-    const collection = collectionObj.value;
+    // Support both old format (collectionObj.value) and new format (collectionObj.value.value)
+    const collection = (collectionObj.value?.value ?? collectionObj.value) as { schema?: unknown } | undefined;
     const block = response.block;
     const schema = collection?.schema;
 
@@ -85,7 +88,8 @@ export const getPosts = async (): Promise<TPosts> => {
       console.warn("⚠️ 페이지 블록 데이터가 존재하지 않습니다.");
       return [];
     }
-    const rawMetadata = block[id]?.value;
+    // Support both old format (block[id].value) and new format (block[id].value.value)
+    const rawMetadata = block[id]?.value?.value ?? block[id]?.value;
     if (!rawMetadata || !["collection_view_page", "collection_view"].includes(rawMetadata?.type)) {
       console.warn("⚠️ 올바르지 않은 Notion 페이지 타입입니다.");
       return [];
@@ -110,8 +114,8 @@ export const getPosts = async (): Promise<TPosts> => {
         const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
         console.log(`🔄 Notion API 요청 (getBlocks), batch ${batchNumber}/${totalBatches}`);
         try {
-          const batchResponse = await fetchWithThrottle(() => api.getBlocks(batch), "getBlocks");
-          Object.assign(allBlocks, batchResponse?.recordMap?.block);
+          const batchResponse = await fetchWithThrottle(() => api.getBlocks(batch), "getBlocks") as any;
+          Object.assign(allBlocks, batchResponse?.recordMap?.block || batchResponse?.block || {});
         } catch (error) {
           console.error("❌ Notion 블록 데이터를 가져오는 데 실패했습니다.", error);
         }
@@ -132,9 +136,10 @@ export const getPosts = async (): Promise<TPosts> => {
       const properties = (await getPageProperties(pageId, blocks, schema)) || null;
       if (!properties) continue;
 
-      // createdTime 및 fullWidth 값 추가
-      properties.createdTime = new Date(blocks[pageId]?.value?.created_time || 0).toISOString();
-      properties.fullWidth = (blocks[pageId]?.value?.format as any)?.page_full_width ?? false;
+      // createdTime 및 fullWidth 값 추가 (nested value 지원)
+      const blockValue = blocks[pageId]?.value?.value ?? blocks[pageId]?.value;
+      properties.createdTime = new Date(blockValue?.created_time || 0).toISOString();
+      properties.fullWidth = (blockValue?.format as any)?.page_full_width ?? false;
 
       data.push(properties);
     }
