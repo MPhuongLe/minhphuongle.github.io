@@ -5,28 +5,29 @@ import { idToUuid } from "notion-utils"
 import getAllPageIds from "src/libs/utils/notion/getAllPageIds"
 import getPageProperties from "src/libs/utils/notion/getPageProperties"
 import { TPosts } from "src/types"
+import { CustomExtendedRecordMap } from "src/types/notion.type"
+
 
 /**
  * @param {{ includePages: boolean }} - false: posts only / true: include pages
  */
+
 
 // TODO: react query를 사용해서 처음 불러온 뒤로는 해당데이터만 사용하도록 수정
 export const getPosts = async () => {
   let id = CONFIG.notionConfig.pageId as string
   const api = new NotionAPI()
 
-  const response = await api.getPage(id)
+  const response = await api.getPage(id) as any as CustomExtendedRecordMap
   id = idToUuid(id)
-  const collection = Object.values(response.collection)[0]?.value
-  const block = response.block
+  const collection = Object.values(response.collection)[0]?.value.value;
+  const block = response.block ;
   const schema = collection?.schema
-
   const rawMetadata = block[id].value
-
   // Check Type
   if (
-    rawMetadata?.type !== "collection_view_page" &&
-    rawMetadata?.type !== "collection_view"
+    rawMetadata?.value.type !== "collection_view_page" &&
+    rawMetadata?.value.type !== "collection_view"
   ) {
     return []
   } else {
@@ -38,10 +39,10 @@ export const getPosts = async () => {
       const properties = (await getPageProperties(id, block, schema)) || null
       // Add fullwidth, createdtime to properties
       properties.createdTime = new Date(
-        block[id].value?.created_time
+        block[id].value.value?.created_time
       ).toString()
       properties.fullWidth =
-        (block[id].value?.format as any)?.page_full_width ?? false
+        (block[id].value.value?.format as any)?.page_full_width ?? false
 
       data.push(properties)
     }
