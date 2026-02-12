@@ -9,9 +9,14 @@ async function getPageProperties(
   schema: CollectionPropertySchemaMap
 ) {
   const api = new NotionAPI()
-  const rawProperties = Object.entries(block?.[id]?.value?.properties || [])
+  
+  // FIX 1: Support nested block value to find properties
+  const blockValue = (block?.[id] as any)?.value?.value || block?.[id]?.value
+  const rawProperties = Object.entries(blockValue?.properties || [])
+  
   const excludeProperties = ["date", "select", "multi_select", "person", "file"]
   const properties: any = {}
+  
   for (let i = 0; i < rawProperties.length; i++) {
     const [key, val]: any = rawProperties[i]
     properties.id = id
@@ -21,9 +26,9 @@ async function getPageProperties(
       switch (schema[key]?.type) {
         case "file": {
           try {
-            const Block = block?.[id].value
+            // FIX 2: Use the unwrapped blockValue for image mapping
             const url: string = val[0][1][0][1]
-            const newurl = customMapImageUrl(url, Block)
+            const newurl = customMapImageUrl(url, blockValue)
             properties[schema[key].name] = newurl
           } catch (error) {
             properties[schema[key].name] = undefined
@@ -58,14 +63,17 @@ async function getPageProperties(
             if (rawUsers[i][0][1]) {
               const userId = rawUsers[i][0]
               const res: any = await api.getUsers(userId)
+              
+              // FIX 3: Support potential nesting in the user response as well
               const resValue =
+                res?.recordMapWithRoles?.notion_user?.[userId[1]]?.value?.value ||
                 res?.recordMapWithRoles?.notion_user?.[userId[1]]?.value
+
               const user = {
                 id: resValue?.id,
                 name:
                   resValue?.name ||
-                  `${resValue?.family_name}${resValue?.given_name}` ||
-                  undefined,
+                  (resValue?.family_name ? `${resValue?.family_name}${resValue?.given_name}` : undefined),
                 profile_photo: resValue?.profile_photo || null,
               }
               users.push(user)
